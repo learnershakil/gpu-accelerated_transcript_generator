@@ -1,0 +1,14 @@
+# Transcript Generator - Python Dependencies
+# High-Accuracy Whisper ASR with CUDA GPU Acceleration
+
+faster-whisper>=1.0.0
+ctranslate2>=4.4.0
+av>=11.0.0,<14.0.0
+rich>=13.0.0
+soundfile>=0.12.0
+numpy>=1.24.0
+
+# CUDA 12 runtime components (for GPU acceleration on NVIDIA RTX GPUs)
+nvidia-cublas-cu12>=12.1.0
+nvidia-cudnn-cu12>=9.0.0
+nvidia-cuda-nvrtc-cu12>=12.1.0
