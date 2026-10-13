@@ -1,28 +1,41 @@
-"""Core transcription engine using Faster-Whisper with GPU acceleration."""
+"""Core transcription engine using Faster-Whisper with GPU acceleration and Hinglish / English support."""
 
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import anyascii
 from faster_whisper import WhisperModel
 
+from config import DEFAULT_TRANSCRIPTION_MODE, TRANSCRIPTION_MODES
 from gpu_utils import get_gpu_info, setup_cuda_environment
+
+# Unicode range covering Arabic / Persian / Urdu script
+ARABIC_URDU_REGEX = re.compile(r"[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]")
+
+
+def ensure_roman_script(text: str) -> str:
+    """If text contains Arabic or Urdu script, transliterate into Roman alphabet."""
+    if ARABIC_URDU_REGEX.search(text):
+        return anyascii.anyascii(text)
+    return text
 
 
 class TranscriptionEngine:
     """Wrapper around faster-whisper WhisperModel with hardware detection,
-    live streaming callbacks, and graceful fallback.
+    live streaming callbacks, Hinglish / English support, and graceful fallback.
     """
 
     def __init__(
         self,
         model_size: str = "large-v3",
         device: str = "cuda",
-        compute_type: str = "float16",
+        compute_type: str = "int8_float16",
         cpu_threads: Optional[int] = None,
         num_workers: int = 1,
     ) -> None:
@@ -43,7 +56,6 @@ class TranscriptionEngine:
         """Load model onto device with fallback handling."""
         try:
             if self.requested_device == "cuda":
-                # Ensure CUDA is accessible
                 gpu = get_gpu_info()
                 if not gpu["cuda_available"]:
                     print(
@@ -88,7 +100,10 @@ class TranscriptionEngine:
         self,
         audio_path: str | Path,
         *,
+        mode: str = DEFAULT_TRANSCRIPTION_MODE,
+        task: Optional[str] = None,
         language: Optional[str] = None,
+        initial_prompt: Optional[str] = None,
         vad_filter: bool = False,
         beam_size: int = 5,
         word_timestamps: bool = True,
@@ -99,7 +114,10 @@ class TranscriptionEngine:
         
         Args:
             audio_path: Path to audio or video media file.
+            mode: 'hinglish' (Roman script), 'english' (translation), or 'native'.
+            task: Optional override for task ('transcribe' or 'translate').
             language: Optional language code (e.g. 'en', 'hi') or None for auto-detect.
+            initial_prompt: Optional guiding prompt to prime the decoder.
             vad_filter: Whether to apply Silero VAD to filter non-speech.
             beam_size: Beam search width (5 gives optimal correctness).
             word_timestamps: Extract word-level start/end timestamps.
@@ -112,13 +130,31 @@ class TranscriptionEngine:
         if self.model is None:
             raise RuntimeError("Model is not initialized.")
 
+        # Determine task, language, and prompt based on mode
+        actual_task = task
+        actual_language = language
+        actual_prompt = initial_prompt
+
+        if mode == "hinglish":
+            actual_task = "transcribe"
+            actual_language = "en"
+            if not actual_prompt:
+                actual_prompt = TRANSCRIPTION_MODES["hinglish"]["initial_prompt"]
+        elif mode == "english":
+            actual_task = "translate"
+            actual_language = None
+        elif mode == "native":
+            actual_task = actual_task or "transcribe"
+            actual_language = actual_language or None
+
         audio_path_str = str(Path(audio_path).resolve())
         start_time = time.time()
 
         segments_iter, transcription_info = self.model.transcribe(
             audio_path_str,
-            language=language,
-            task="transcribe",
+            language=actual_language,
+            task=actual_task,
+            initial_prompt=actual_prompt,
             beam_size=beam_size,
             vad_filter=vad_filter,
             word_timestamps=word_timestamps,
@@ -126,6 +162,8 @@ class TranscriptionEngine:
 
         total_duration = max(0.1, float(getattr(transcription_info, "duration", 0.0) or 0.1))
         info_dict: Dict[str, Any] = {
+            "mode": mode,
+            "task": actual_task,
             "language": getattr(transcription_info, "language", "unknown"),
             "language_probability": round(float(getattr(transcription_info, "language_probability", 1.0) or 1.0), 4),
             "duration": total_duration,
@@ -136,18 +174,27 @@ class TranscriptionEngine:
         collected_segments: List[Dict[str, Any]] = []
 
         for seg in segments_iter:
+            raw_text = seg.text
+            if mode in ("hinglish", "english"):
+                clean_text = ensure_roman_script(raw_text)
+            else:
+                clean_text = raw_text
+
             seg_dict: Dict[str, Any] = {
                 "id": seg.id,
                 "start": round(seg.start, 3),
                 "end": round(seg.end, 3),
-                "text": seg.text,
+                "text": clean_text,
                 "words": [],
             }
 
             if seg.words:
                 for w in seg.words:
+                    word_str = w.word
+                    if mode in ("hinglish", "english"):
+                        word_str = ensure_roman_script(word_str)
                     seg_dict["words"].append({
-                        "word": w.word,
+                        "word": word_str,
                         "start": round(w.start, 3),
                         "end": round(w.end, 3),
                         "probability": round(w.probability, 3) if w.probability is not None else 1.0,

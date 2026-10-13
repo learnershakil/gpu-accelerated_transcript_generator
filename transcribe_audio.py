@@ -33,7 +33,8 @@ def cli() -> int:
         
         gpu_info = main.get_gpu_info()
         main.display_banner(gpu_info)
-        config = main.configure_transcription(target_path, gpu_info)
+        mode = main.select_transcription_mode()
+        config = main.configure_transcription(target_path, gpu_info, mode)
         
         print("\nLoading model and initiating transcription...")
         engine = main.TranscriptionEngine(
@@ -44,6 +45,7 @@ def cli() -> int:
         
         segments, info_dict = engine.transcribe(
             config["file_path"],
+            mode=config["mode"],
             language=config["language"],
             vad_filter=config["vad_filter"],
             beam_size=config["beam_size"],

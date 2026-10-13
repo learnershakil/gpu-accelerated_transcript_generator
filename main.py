@@ -50,8 +50,8 @@ def display_banner(gpu_info: Dict[str, Any]) -> None:
     """Display modern CLI header banner with hardware diagnostics."""
     console.print()
     banner_text = Text()
-    banner_text.append("🎙️  TRANSCRIPT GENERATOR PIPELINE\n", style="bold cyan")
-    banner_text.append("⚡ High-Accuracy AI Transcription powered by Faster-Whisper & CUDA\n\n", style="italic")
+    banner_text.append("TRANSCRIPT GENERATOR PIPELINE\n", style="bold cyan")
+    banner_text.append("High-Accuracy AI Transcription powered by Faster-Whisper & CUDA\n\n", style="italic")
 
     # Hardware status badge
     if gpu_info["cuda_available"]:
@@ -76,8 +76,8 @@ def select_media_type() -> str:
     table.add_column("Type", style="bold white", width=16)
     table.add_column("Description", style="dim")
 
-    table.add_row("1", "🎥 Video", "Movies, recorded lectures, clips (.mp4, .mkv, .mov, etc.)")
-    table.add_row("2", "🎵 Audio", "Voice notes, podcasts, recordings (.mp3, .wav, .m4a, etc.)")
+    table.add_row("1", "Video", "Movies, recorded lectures, clips (.mp4, .mkv, .mov, etc.)")
+    table.add_row("2", "Audio", "Voice notes, podcasts, recordings (.mp3, .wav, .m4a, etc.)")
     console.print(table)
 
     while True:
@@ -155,12 +155,52 @@ def get_file_path(expected_ext: str) -> Path:
                 return same_name_local.resolve()
 
 
-def configure_transcription(file_path: Path, gpu_info: Dict[str, Any]) -> Dict[str, Any]:
+from config import (
+    AUDIO_FORMATS,
+    DEFAULT_BEAM_SIZE,
+    DEFAULT_COMPUTE_TYPE,
+    DEFAULT_DEVICE,
+    DEFAULT_MODEL,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_TRANSCRIPTION_MODE,
+    DEFAULT_VAD_FILTER,
+    DEFAULT_WORD_TIMESTAMPS,
+    TARGET_GPU_NAME,
+    TRANSCRIPTION_MODES,
+    VIDEO_FORMATS,
+    WHISPER_MODELS,
+)
+
+
+def select_transcription_mode() -> str:
+    """Prompt user to choose language/script mode: Hinglish, English, or Native."""
+    console.print("\n[bold cyan]Step 4: Select Transcript Language / Script Mode[/bold cyan]")
+    table = Table(show_header=True, header_style="bold magenta", border_style="dim")
+    table.add_column("Option", style="bold yellow", width=8, justify="center")
+    table.add_column("Mode", style="bold white", width=28)
+    table.add_column("Description", style="dim")
+
+    table.add_row("1", "🇮🇳 Hinglish (Recommended)", "Hindi + English spoken words in Roman/English alphabet (No Urdu/Arabic)")
+    table.add_row("2", "🇬🇧 English Translation", "Translates speech into fluent English text")
+    table.add_row("3", "🌐 Auto-Detect / Native Script", "Standard Whisper output in native alphabet (Devanagari/Urdu/etc.)")
+    console.print(table)
+
+    choice = Prompt.ask("[bold green]Choose mode (1-3)[/bold green]", choices=["1", "2", "3", "hinglish", "english", "native"], default="1")
+    if choice in ("1", "hinglish"):
+        return "hinglish"
+    elif choice in ("2", "english"):
+        return "english"
+    else:
+        return "native"
+
+
+def configure_transcription(file_path: Path, gpu_info: Dict[str, Any], mode: str) -> Dict[str, Any]:
     """Configure model, hardware, language, and output settings."""
     file_size_mb = round(file_path.stat().st_size / (1024 * 1024), 2)
     rec_dev, rec_compute, rec_model = get_recommended_settings()
+    mode_title = TRANSCRIPTION_MODES[mode]["title"]
 
-    console.print("\n[bold cyan]Step 4: Configuration & Settings[/bold cyan]")
+    console.print("\n[bold cyan]Step 5: Configuration & Hardware Summary[/bold cyan]")
     
     summary_table = Table(show_header=False, border_style="cyan")
     summary_table.add_column("Key", style="bold white", width=22)
@@ -171,9 +211,10 @@ def configure_transcription(file_path: Path, gpu_info: Dict[str, Any]) -> Dict[s
     summary_table.add_row("Target Hardware", f"{gpu_info.get('device_name', TARGET_GPU_NAME)} (RTX 3050)")
     summary_table.add_row("Compute Engine", f"{rec_dev.upper()} ({rec_compute})")
     summary_table.add_row("Whisper Model", f"{rec_model} (State-of-the-art accuracy)")
+    summary_table.add_row("Transcript Mode", f"{mode_title}")
     console.print(summary_table)
 
-    customize = Confirm.ask("\n[bold yellow]Do you want to customize advanced settings (Model, Language, VAD)?[/bold yellow]", default=False)
+    customize = Confirm.ask("\n[bold yellow]Do you want to customize advanced settings (Model, VAD, Beam Size)?[/bold yellow]", default=False)
     
     selected_model = rec_model
     selected_lang = None
@@ -187,8 +228,9 @@ def configure_transcription(file_path: Path, gpu_info: Dict[str, Any]) -> Dict[s
             console.print(f"  • [bold cyan]{key}[/bold cyan]: {m['description']} - VRAM {m['vram']}{rec_tag}")
         selected_model = Prompt.ask("Choose model", choices=list(WHISPER_MODELS.keys()), default=rec_model)
 
-        lang_input = Prompt.ask("Language code (e.g. 'en', 'hi', 'es' or press Enter for auto-detect)", default="")
-        selected_lang = lang_input.strip() if lang_input.strip() else None
+        if mode == "native":
+            lang_input = Prompt.ask("Language code (e.g. 'en', 'hi', 'es' or press Enter for auto-detect)", default="")
+            selected_lang = lang_input.strip() if lang_input.strip() else None
 
         vad_filter = Confirm.ask("Enable Voice Activity Filter (VAD) to filter silence/music?", default=False)
         beam_size = IntPrompt.ask("Beam search size (higher = better correctness)", default=DEFAULT_BEAM_SIZE)
@@ -199,6 +241,7 @@ def configure_transcription(file_path: Path, gpu_info: Dict[str, Any]) -> Dict[s
 
     return {
         "file_path": file_path,
+        "mode": mode,
         "model_size": selected_model,
         "device": rec_dev,
         "compute_type": rec_compute,
@@ -226,18 +269,21 @@ def run_pipeline() -> int:
     file_path = get_file_path(ext)
     console.print(f"[green]✔ File Selected: {file_path.name}[/green]")
 
-    # Step 4: Configuration
-    config = configure_transcription(file_path, gpu_info)
+    # Step 4: Language / Script Mode
+    transcription_mode = select_transcription_mode()
+    console.print(f"[green]✔ Transcript Mode: {TRANSCRIPTION_MODES[transcription_mode]['title']}[/green]")
+
+    # Step 5: Configuration
+    config = configure_transcription(file_path, gpu_info, transcription_mode)
 
     # Confirmation
     if not Confirm.ask("\n[bold green]Ready to start transcription? Proceed?[/bold green]", default=True):
         console.print("[yellow]Operation cancelled by user.[/yellow]")
         return 0
 
-    # Step 5: Loading Model
+    # Step 6: Loading Model
     console.print("\n" + "=" * 65)
-    console.print(f"[bold cyan]⚡ Loading Whisper Model '{config['model_size']}' onto {config['device'].upper()} ({config['compute_type']})...[/bold cyan]")
-    console.print("[dim]First run will automatically download model weights into cache.[/dim]")
+    console.print(f"[bold cyan] Loading Whisper Model '{config['model_size']}' onto {config['device'].upper()} ({config['compute_type']})...[/bold cyan]")
 
     try:
         engine = TranscriptionEngine(
@@ -252,8 +298,8 @@ def run_pipeline() -> int:
     actual_dev_text = f"{engine.actual_device.upper()} ({engine.actual_compute_type})"
     console.print(f"[bold green]✔ Model loaded successfully on {actual_dev_text}![/bold green]\n")
 
-    # Step 6: Processing with Real-Time Progress & Live Transcript Stream
-    console.print("[bold cyan]🎙️  Transcribing media... Live preview below:[/bold cyan]\n")
+    # Step 7: Processing with Real-Time Progress & Live Transcript Stream
+    console.print(f"[bold cyan] Transcribing media in {TRANSCRIPTION_MODES[config['mode']]['title']}... Live preview below:[/bold cyan]\n")
 
     progress = Progress(
         SpinnerColumn(),
@@ -280,6 +326,7 @@ def run_pipeline() -> int:
     try:
         segments, info_dict = engine.transcribe(
             config["file_path"],
+            mode=config["mode"],
             language=config["language"],
             vad_filter=config["vad_filter"],
             beam_size=config["beam_size"],
@@ -311,6 +358,8 @@ def run_pipeline() -> int:
         "source_filepath": str(file_path),
         "source_filename": file_path.name,
         "model": config["model_size"],
+        "mode": config["mode"],
+        "mode_title": TRANSCRIPTION_MODES[config["mode"]]["title"],
         "device": engine.actual_device,
         "compute_type": engine.actual_compute_type,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -331,10 +380,11 @@ def run_pipeline() -> int:
     lang_code = info_dict.get("language", "unknown").upper()
     lang_prob = info_dict.get("language_probability", 1.0) * 100
 
-    results_table = Table(title="🎉 Transcription Results Summary", header_style="bold magenta", border_style="green")
+    results_table = Table(title="Transcription Results Summary", header_style="bold magenta", border_style="green")
     results_table.add_column("Metric", style="bold cyan", width=22)
     results_table.add_column("Details", style="white")
 
+    results_table.add_row("Transcript Mode", TRANSCRIPTION_MODES[config["mode"]]["title"])
     results_table.add_row("Audio Duration", f"{dur_str} ({info_dict['duration']:.2f}s)")
     results_table.add_row("Detected Language", f"{lang_code} ({lang_prob:.1f}% confidence)")
     results_table.add_row("Processing Time", f"{info_dict.get('processing_time_seconds', 0.0):.2f} seconds")
@@ -343,7 +393,7 @@ def run_pipeline() -> int:
     results_table.add_row("Total Words", str(total_words))
     console.print(results_table)
 
-    files_table = Table(title="📁 Generated Output Files", header_style="bold yellow", border_style="cyan")
+    files_table = Table(title="Generated Output Files", header_style="bold yellow", border_style="cyan")
     files_table.add_column("Format", style="bold white", width=12)
     files_table.add_column("File Path", style="cyan")
 
@@ -355,7 +405,7 @@ def run_pipeline() -> int:
     files_table.add_row("Markdown", str(md_path))
     console.print(files_table)
 
-    console.print(f"\n[bold green]✨ All output files have been saved to: [underline]{out_dir}[/underline][/bold green]\n")
+    console.print(f"\n[bold green] All output files have been saved to: [underline]{out_dir}[/underline][/bold green]\n")
     return 0
 
 

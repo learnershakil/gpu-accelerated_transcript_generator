@@ -107,9 +107,8 @@ def get_recommended_settings() -> Tuple[str, str, str]:
     gpu = get_gpu_info()
     if gpu["cuda_available"]:
         device = "cuda"
-        # RTX 3050 supports float16 and int8_float16
-        # If memory <= 4GB, float16 works with large-v3 or large-v3-turbo
-        compute_type = "float16" if "float16" in gpu["compute_types_supported"] else "int8_float16"
+        # RTX 3050 supports int8_float16 which uses ~1.8GB VRAM with float16 tensor cores
+        compute_type = "int8_float16" if "int8_float16" in gpu["compute_types_supported"] else "float16"
         model = "large-v3"
         return device, compute_type, model
     else:

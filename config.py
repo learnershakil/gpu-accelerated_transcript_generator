@@ -75,10 +75,43 @@ WHISPER_MODELS: Dict[str, Dict[str, str]] = {
 # GPU / Hardware Configuration
 DEFAULT_MODEL = os.environ.get("WHISPER_MODEL", "large-v3")
 DEFAULT_DEVICE = os.environ.get("WHISPER_DEVICE", "cuda")
-DEFAULT_COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "float16")
+# int8_float16 uses ~1.8GB VRAM on RTX 3050 with identical precision to float16
+DEFAULT_COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "int8_float16")
 DEFAULT_BEAM_SIZE = int(os.environ.get("WHISPER_BEAM_SIZE", "5"))
 DEFAULT_WORD_TIMESTAMPS = True
 DEFAULT_VAD_FILTER = os.environ.get("WHISPER_VAD", "false").lower() in ("true", "1", "yes")
 
 # Target GPU Spec
 TARGET_GPU_NAME = "NVIDIA GeForce RTX 3050"
+
+# Transcription Script & Language Modes
+TRANSCRIPTION_MODES = {
+    "hinglish": {
+        "title": "🇮🇳 Hinglish (Recommended)",
+        "description": "Hindi + English spoken words written in Roman/English alphabet (No Urdu/Arabic script)",
+        "task": "transcribe",
+        "language": "en",
+        "initial_prompt": (
+            "Yeh transcript Hinglish mein Roman script (Latin alphabet) mein likhi gayi hai. "
+            "Jaise: Hi Sam this side, main utha hoon sade char baje 4:30 PM par, cook karne ja raha hoon, "
+            "university management system pe complaint dalna hai, "
+            "mobile app deliver karna hai, gsoc repos check karna hai."
+        ),
+    },
+    "english": {
+        "title": "🇬🇧 English Translation",
+        "description": "Translates any spoken language directly into fluent English text",
+        "task": "translate",
+        "language": None,
+        "initial_prompt": None,
+    },
+    "native": {
+        "title": "🌐 Auto-Detect / Native Script",
+        "description": "Standard Whisper output in native alphabet (Devanagari/Urdu/etc.)",
+        "task": "transcribe",
+        "language": None,
+        "initial_prompt": None,
+    },
+}
+DEFAULT_TRANSCRIPTION_MODE = "hinglish"
+
